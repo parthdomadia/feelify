@@ -88,7 +88,7 @@ export default function Home() {
 
       <footer className="border-t py-8">
         <div className="container text-center text-muted-foreground">
-          <p>© 2025 MoodTunes. All rights reserved.</p>
+          <p>© 2025 Feelify. All rights reserved.</p>
         </div>
       </footer>
     </div>

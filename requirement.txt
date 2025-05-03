@@ -1,0 +1,15 @@
+Flask
+flask-cors
+python-dotenv
+nltk
+joblib
+pandas
+requests
+numpy
+torch
+transformers
+librosa
+music21
+keras
+midi2audio
+pydub

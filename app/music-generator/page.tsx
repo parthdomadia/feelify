@@ -1,54 +1,123 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { ArrowLeft, Play, Pause, Download, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { Progress } from "@/components/ui/progress"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
+import * as Tone from "tone"
+import { Midi } from "@tonejs/midi"
 
 export default function MusicGenerator() {
+  const [numInputs, setNumInputs] = useState([3])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState(0)
+  const [midiUrl, setMidiUrl] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [generatedMusic, setGeneratedMusic] = useState<string | null>(null)
-  const [selectedMood, setSelectedMood] = useState("happy")
-  const [selectedGenre, setSelectedGenre] = useState("electronic")
-  const [tempo, setTempo] = useState([120])
-  const [duration, setDuration] = useState([30])
-  const [prompt, setPrompt] = useState("")
+  const [playProgress, setPlayProgress] = useState(0)
+  const durationRef = useRef(30)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  const generateMusic = () => {
+  const generateMusic = async () => {
     setIsGenerating(true)
+    setMidiUrl(null)
+    setPlayProgress(0)
+    setIsPlaying(false)
     setGenerationProgress(0)
-    setGeneratedMusic(null)
 
-    // Simulate progress updates
-    const interval = setInterval(() => {
-      setGenerationProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          setIsGenerating(false)
-          // Mock generated music URL - in a real app, this would be from an AI model
-          setGeneratedMusic("/placeholder-audio.mp3")
-          return 100
+    const fakeProgress = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev >= 95) {
+          clearInterval(fakeProgress)
+          return prev
         }
-        return prev + 10
+        return prev + 5
       })
-    }, 500)
+    }, 200)
+
+    try {
+      const formData = new FormData()
+      formData.append("num_inputs", String(numInputs[0]))
+
+      const res = await fetch("http://localhost:5000/generate-music", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to generate music.")
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      setMidiUrl(url)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      clearInterval(fakeProgress)
+      setIsGenerating(false)
+      setGenerationProgress(100)
+    }
   }
 
-  const togglePlayback = () => {
-    setIsPlaying(!isPlaying)
+  const playMidi = async () => {
+    if (!midiUrl || isPlaying) return
+
+    const response = await fetch(midiUrl)
+    const arrayBuffer = await response.arrayBuffer()
+    const midi = new Midi(arrayBuffer)
+
+    const now = Tone.now()
+    await Tone.start()
+
+    durationRef.current = midi.duration
+    setPlayProgress(0)
+    setIsPlaying(true)
+
+    intervalRef.current = setInterval(() => {
+      setPlayProgress(prev => {
+        const next = prev + 0.1
+        if (next >= durationRef.current) {
+          clearInterval(intervalRef.current!)
+          setIsPlaying(false)
+          return 0
+        }
+        return next
+      })
+    }, 100)
+
+    midi.tracks.forEach(track => {
+      const synth = new Tone.Synth().toDestination()
+      track.notes.forEach(note => {
+        synth.triggerAttackRelease(note.name, note.duration, note.time + now, note.velocity)
+      })
+    })
   }
+
+  const pauseOrResumeMidi = () => {
+    if (isPlaying) {
+      Tone.Transport.pause()
+      setIsPlaying(false)
+      if (intervalRef.current) clearInterval(intervalRef.current)
+    } else {
+      Tone.start()
+      setIsPlaying(true)
+      intervalRef.current = setInterval(() => {
+        setPlayProgress(Tone.Transport.seconds)
+        if (Tone.Transport.seconds >= durationRef.current) {
+          clearInterval(intervalRef.current!)
+          setIsPlaying(false)
+        }
+      }, 100)
+    }
+  }
+  
 
   return (
-    <div className="container max-w-4xl py-12">
+    <div className="container max-w-6xl py-12">
       <div className="mb-8">
         <Link href="/" className="flex items-center text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -57,166 +126,84 @@ export default function MusicGenerator() {
       </div>
 
       <h1 className="text-3xl font-bold mb-6">Music Generator</h1>
-      <p className="text-muted-foreground mb-8">Generate unique music based on your mood and preferences.</p>
+      <p className="text-muted-foreground mb-8">Generate unique music by combining multiple MIDI tracks.</p>
 
       <div className="grid md:grid-cols-5 gap-6">
+        {/* Left Panel */}
         <div className="md:col-span-3">
           <Card>
             <CardHeader>
               <CardTitle>Generate Music</CardTitle>
-              <CardDescription>Customize parameters to create your perfect track</CardDescription>
+              <CardDescription>Choose how many MIDI files to blend</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="mood" className="mb-6">
-                <TabsList className="grid grid-cols-2">
-                  <TabsTrigger value="mood">Mood-based</TabsTrigger>
-                  <TabsTrigger value="prompt">Prompt-based</TabsTrigger>
-                </TabsList>
-                <TabsContent value="mood" className="space-y-6 pt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="mood">Mood</Label>
-                    <Select value={selectedMood} onValueChange={setSelectedMood}>
-                      <SelectTrigger id="mood">
-                        <SelectValue placeholder="Select mood" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="happy">Happy</SelectItem>
-                        <SelectItem value="sad">Sad</SelectItem>
-                        <SelectItem value="energetic">Energetic</SelectItem>
-                        <SelectItem value="calm">Calm</SelectItem>
-                        <SelectItem value="focused">Focused</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="genre">Genre</Label>
-                    <Select value={selectedGenre} onValueChange={setSelectedGenre}>
-                      <SelectTrigger id="genre">
-                        <SelectValue placeholder="Select genre" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="electronic">Electronic</SelectItem>
-                        <SelectItem value="ambient">Ambient</SelectItem>
-                        <SelectItem value="classical">Classical</SelectItem>
-                        <SelectItem value="jazz">Jazz</SelectItem>
-                        <SelectItem value="rock">Rock</SelectItem>
-                        <SelectItem value="pop">Pop</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label htmlFor="tempo">Tempo (BPM)</Label>
-                      <span className="text-sm text-muted-foreground">{tempo[0]}</span>
-                    </div>
-                    <Slider id="tempo" min={60} max={180} step={1} value={tempo} onValueChange={setTempo} />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label htmlFor="duration">Duration (seconds)</Label>
-                      <span className="text-sm text-muted-foreground">{duration[0]}</span>
-                    </div>
-                    <Slider id="duration" min={10} max={60} step={5} value={duration} onValueChange={setDuration} />
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="prompt" className="space-y-6 pt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="prompt">Describe your music</Label>
-                    <Input
-                      id="prompt"
-                      placeholder="E.g., A dreamy ambient track with piano and soft synths"
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Be specific about instruments, mood, tempo, and style for best results.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label htmlFor="duration-prompt">Duration (seconds)</Label>
-                      <span className="text-sm text-muted-foreground">{duration[0]}</span>
-                    </div>
-                    <Slider
-                      id="duration-prompt"
-                      min={10}
-                      max={60}
-                      step={5}
-                      value={duration}
-                      onValueChange={setDuration}
-                    />
-                  </div>
-                </TabsContent>
-              </Tabs>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label htmlFor="num-inputs" className="text-sm font-medium">
+                    Number of Songs
+                  </label>
+                  <span className="text-sm text-muted-foreground">{numInputs[0]}</span>
+                </div>
+                <Slider id="num-inputs" min={1} max={100} step={1} value={numInputs} onValueChange={setNumInputs} />
+              </div>
 
               <Button onClick={generateMusic} disabled={isGenerating} className="w-full">
                 {isGenerating ? "Generating..." : "Generate Music"}
               </Button>
+
+              {isGenerating && (
+                <>
+                  <Progress value={generationProgress} className="h-2" />
+                  <p className="text-center text-sm text-muted-foreground mt-2">{generationProgress}% complete</p>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
 
+        {/* Right Panel */}
         <div className="md:col-span-2">
           <Card className="h-full flex flex-col">
             <CardHeader>
               <CardTitle>Generated Music</CardTitle>
               <CardDescription>Preview and download your creation</CardDescription>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col">
-              {isGenerating ? (
-                <div className="flex-1 flex flex-col justify-center space-y-4">
-                  <p className="text-center">Generating your music...</p>
-                  <Progress value={generationProgress} className="h-2" />
-                  <p className="text-center text-sm text-muted-foreground">{generationProgress}% complete</p>
-                </div>
-              ) : generatedMusic ? (
-                <div className="flex-1 flex flex-col justify-between">
+            <CardContent className="flex-1 flex flex-col justify-center space-y-4">
+              {!isGenerating && midiUrl ? (
+                <>
                   <div className="aspect-square bg-muted rounded-md flex items-center justify-center mb-4">
-                    <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center">
+                    <div className="w-24 h-24 rounded-full bg-green-600/20 flex items-center justify-center">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-16 w-16 rounded-full bg-green-500 text-primary-foreground"
-                        onClick={togglePlayback}
-                      >
+                        className="h-16 w-16 rounded-full bg-green-500 text-white"
+                        onClick={midiUrl && isPlaying ? pauseOrResumeMidi : playMidi}
+                        >
                         {isPlaying ? <Pause className="h-8 w-8" /> : <Play className="h-8 w-8 ml-1" />}
                       </Button>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="h-12 bg-muted rounded-md flex items-center px-4">
-                      <div className="w-full">
-                        <div className="h-1.5 bg-primary rounded-full" style={{ width: isPlaying ? "45%" : "0%" }} />
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <p className="text-sm text-muted-foreground">
-                        {isPlaying ? "00:15" : "00:00"} /{" "}
-                        {duration[0] < 10 ? `00:0${duration[0]}` : `00:${duration[0]}`}
-                      </p>
-                      <div className="space-x-2">
-                        <Button variant="outline" size="icon">
-                          <RefreshCw className="h-4 w-4" />
-                        </Button>
-                        <Button variant="outline" size="icon">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
+                  <Progress value={(playProgress / durationRef.current) * 100} className="h-2" />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>{playProgress.toFixed(1)}s</span>
+                    <span>{durationRef.current.toFixed(1)}s</span>
                   </div>
-                </div>
+
+                  <div className="flex justify-end space-x-2">
+                    <Button variant="outline" size="icon" onClick={() => setMidiUrl(null)}>
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                    <a href={midiUrl} download="generated.mid">
+                      <Button variant="outline" size="icon">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </a>
+                  </div>
+                </>
               ) : (
-                <div className="flex-1 flex items-center justify-center text-center p-4">
-                  <p className="text-muted-foreground">
-                    Adjust the parameters and click "Generate Music" to create your track.
-                  </p>
+                <div className="text-center text-muted-foreground text-sm px-4">
+                  Generate a track using the slider to preview it here.
                 </div>
               )}
             </CardContent>
@@ -226,3 +213,4 @@ export default function MusicGenerator() {
     </div>
   )
 }
+

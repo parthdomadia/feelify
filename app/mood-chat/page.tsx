@@ -48,39 +48,63 @@ export default function MoodChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim()) return
-
-    // Add user message
+  
     const userMessage: Message = {
       id: Date.now().toString(),
       content: input,
       role: "user",
       timestamp: new Date(),
     }
-
+  
     setMessages((prev) => [...prev, userMessage])
     setInput("")
     setIsTyping(true)
-
-    // Simulate AI response after a delay
-    setTimeout(() => {
-      const mood = analyzeMood(input)
-      setDetectedMood(mood)
-
+  
+    try {
+      const response = await fetch("http://localhost:5000/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: input }),
+      })
+  
+      const data = await response.json()
+  
       const botResponse: Message = {
         id: (Date.now() + 1).toString(),
-        content: `Based on what you've shared, I sense you're feeling ${mood.toLowerCase()}. Here are some songs that might resonate with your current mood.`,
+        content: `Based on what you've shared, I sense you're feeling ${data.mood.toLowerCase()}. Here are some songs that might resonate with your current mood.`,
         role: "assistant",
         timestamp: new Date(),
       }
-
+  
+      setDetectedMood(data.mood)
+      setRecommendations(
+        data.recommendations.map((songString: string) => {
+          const [artist, title] = songString.split(" - ")
+          return {
+            title: title?.trim() || "Unknown Title",
+            artist: artist?.trim() || "Unknown Artist",
+            mood: data.mood,
+          }
+        })
+      )
       setMessages((prev) => [...prev, botResponse])
-      setRecommendations(getSongRecommendations(mood))
-      setIsTyping(false)
-    }, 1500)
+    } catch (error) {
+      const errorMsg: Message = {
+        id: (Date.now() + 2).toString(),
+        content: "Sorry, there was an error connecting to the AI.",
+        role: "assistant",
+        timestamp: new Date(),
+      }
+      setMessages((prev) => [...prev, errorMsg])
+      setDetectedMood("Error")
+    }
+  
+    setIsTyping(false)
   }
+  
 
   // Simple mood analysis function (in a real app, this would use an AI model)
   const analyzeMood = (text: string): string => {

@@ -25,3 +25,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# audio files
+*.mp3
+*.wav
+*.mid
+
+*.zip
+*.tar.gz
+*.pkl
+*.h5
+*.safetensors
